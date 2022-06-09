@@ -48,6 +48,7 @@ def mk_find(path: str):
 
 findall_placemarks = mk_findall("Document/Placemark")
 find_schemadata = mk_find("Document/ExtendedData/SchemaData")
+findall_coords = mk_findall("Document/Placemark/gx:Track/gx:coord")
 
 
 def find_first_track_placemark(tree):
@@ -153,7 +154,6 @@ def merge_simplearraydata(base_tree, other_trees):
                 f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='{sad_name}']/gx:value"
             )(base_tree)
         )
-        print(sad_name, num_rows)
         assert num_rows == num_sad_values, f"{sad_name}, {num_sad_values}, {num_rows}"
 
     return base_tree
@@ -162,6 +162,11 @@ def merge_simplearraydata(base_tree, other_trees):
 def myflightbook_merge(merge_sad: bool, trees):
     base_tree = trees[0]
     other_trees = trees[1:]
+
+    count_coords = lambda tree: len(findall_coords(tree))
+    num_coords_before = sum(map(count_coords, trees))
+    assert num_coords_before
+    print(num_coords_before)
 
     base_track_pm = base_tree.find("Document/Placemark/gx:Track", namespaces=FF_XML_NS)
     assert base_track_pm is not None
@@ -173,6 +178,8 @@ def myflightbook_merge(merge_sad: bool, trees):
         for when, coord in zip(whens, coords):
             base_track_pm.append(when)
             base_track_pm.append(coord)
+
+    assert count_coords(base_tree) == num_coords_before
     if merge_sad:
         return merge_simplearraydata(base_tree, other_trees)
 
@@ -224,7 +231,11 @@ def main():
     )
 
     outname = args.out or (
-        "-".join(filter(None, ["merged", args.merge, ",".join(map(str, args.indices))]))
+        "-".join(
+            filter(
+                None, ["merged", args.merge, ",".join(map(str, args.indices or list()))]
+            )
+        )
         + ".kml"
     )
 
