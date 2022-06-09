@@ -5,6 +5,8 @@ from lxml import etree
 
 clean_parser = etree.XMLParser(remove_blank_text=True)
 
+FT_PER_M = 3.28084
+
 
 def read_kml(fname: str):
     return etree.parse(fname, clean_parser).getroot()
@@ -214,6 +216,37 @@ def sort_and_select(indices, trees):
     return trees
 
 
+def to_mfb_csv(fname: str, tree):
+    import csv
+
+    with open(fname, "w", newline="") as csvfile:
+        writer = csv.DictWriter(
+            csvfile, ["DATE", "LAT", "LON", "ALT", "AIRSPEED", "COURSE"]
+        )
+        writer.writeheader()
+        for when, coord, airspeed, course in zip(
+            findall_when(tree),
+            findall_coords(tree),
+            xpath(
+                f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='speed_kts']/gx:value"
+            )(tree),
+            xpath(
+                f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='course']/gx:value"
+            )(tree),
+        ):
+            lat, lon, alt_m = coord.text.split(" ")
+            writer.writerow(
+                dict(
+                    DATE=when.text,
+                    LAT=float(lat),
+                    LON=float(lon),
+                    ALT=round(float(alt_m) * FT_PER_M, 2),
+                    AIRSPEED=float(airspeed.text),
+                    COURSE=float(course.text),
+                )
+            )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("filenames", nargs="+")
@@ -230,16 +263,14 @@ def main():
         sort_and_select(args.indices, all_trees), merge_type=args.merge
     )
 
-    outname = args.out or (
-        "-".join(
-            filter(
-                None, ["merged", args.merge, ",".join(map(str, args.indices or list()))]
-            )
-        )
-        + ".kml"
+    base_name = "-".join(
+        filter(None, ["merged", args.merge, ",".join(map(str, args.indices or list()))])
     )
+    kmloutname = args.out or (base_name + ".kml")
 
-    write_kml(outname, merged)
+    write_kml(kmloutname, merged)
+    if args.merge == "mfb-sad":
+        to_mfb_csv(base_name + ".csv", merged)
 
 
 if __name__ == "__main__":
