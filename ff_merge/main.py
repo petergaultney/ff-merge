@@ -3,10 +3,11 @@ from datetime import datetime
 from functools import partial
 from lxml import etree
 
+clean_parser = etree.XMLParser(remove_blank_text=True)
+
 
 def read_kml(fname: str):
-    with open(fname, "rb") as f:
-        return etree.fromstring(f.read())
+    return etree.parse(fname, clean_parser).getroot()
 
 
 def write_kml(fname: str, tree):
@@ -166,7 +167,6 @@ def myflightbook_merge(merge_sad: bool, trees):
     count_coords = lambda tree: len(findall_coords(tree))
     num_coords_before = sum(map(count_coords, trees))
     assert num_coords_before
-    print(num_coords_before)
 
     base_track_pm = base_tree.find("Document/Placemark/gx:Track", namespaces=FF_XML_NS)
     assert base_track_pm is not None
