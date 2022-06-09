@@ -234,10 +234,10 @@ def to_mfb_csv(fname: str, tree):
                 f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='course']/gx:value"
             )(tree),
         ):
-            lat, lon, alt_m = coord.text.split(" ")
+            lon, lat, alt_m = coord.text.split(" ")
             writer.writerow(
                 dict(
-                    DATE=when.text,
+                    DATE=when.text.split(".")[0] + "Z",
                     LAT=float(lat),
                     LON=float(lon),
                     ALT=round(float(alt_m) * FT_PER_M, 2),
