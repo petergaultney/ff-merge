@@ -1,6 +1,8 @@
 import argparse
 from datetime import datetime
 from functools import partial
+from pathlib import Path
+
 from lxml import etree
 
 clean_parser = etree.XMLParser(remove_blank_text=True)
@@ -13,7 +15,7 @@ def read_kml(fname: str):
 
 
 def write_kml(fname: str, tree):
-    etree.ElementTree(tree).write(fname, pretty_print=True)
+    etree.ElementTree(tree).write(fname, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
 
 FF_XML_NS = {
@@ -115,27 +117,9 @@ def remove_el(el):
     el.getparent().remove(el)
 
 
-def google_earth_merge(trees):
-    """Trees must be pre-sorted"""
-    base_tree = trees[0]
-    others = trees[1:]
-
-    base_track_pm = find_first_track_placemark(base_tree)
-    for tree in others:
-        next_track_pm = find_first_track_placemark(tree)
-        assert next_track_pm is not None
-        base_track_pm.addnext(next_track_pm)
-        base_track_pm = next_track_pm
-
-    remove_el(find_schemadata(base_tree))
-    return base_tree
-
-
 def merge_simplearraydata(base_tree, other_trees):
     def get_sads(tree):
-        return tree.findall(
-            "Document/ExtendedData/SchemaData/gx:SimpleArrayData", namespaces=FF_XML_NS
-        )
+        return tree.findall("Document/ExtendedData/SchemaData/gx:SimpleArrayData", namespaces=FF_XML_NS)
 
     def find_sad(tree, name):
         sads = get_sads(tree)
@@ -153,13 +137,28 @@ def merge_simplearraydata(base_tree, other_trees):
             for val_el in sad.findall("gx:value", namespaces=FF_XML_NS):
                 base_sad.append(val_el)
         num_sad_values = len(
-            xpath(
-                f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='{sad_name}']/gx:value"
-            )(base_tree)
+            xpath(f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='{sad_name}']/gx:value")(
+                base_tree
+            )
         )
         assert num_rows == num_sad_values, f"{sad_name}, {num_sad_values}, {num_rows}"
 
     return base_tree
+
+
+def google_earth_merge(trees):
+    """Trees must be pre-sorted"""
+    base_tree = trees[0]
+    other_trees = trees[1:]
+
+    base_track_pm = find_first_track_placemark(base_tree)
+    for tree in other_trees:
+        next_track_pm = find_first_track_placemark(tree)
+        assert next_track_pm is not None
+        base_track_pm.addnext(next_track_pm)
+        base_track_pm = next_track_pm
+
+    return merge_simplearraydata(base_tree, other_trees)
 
 
 def myflightbook_merge(merge_sad: bool, trees):
@@ -174,9 +173,7 @@ def myflightbook_merge(merge_sad: bool, trees):
     assert base_track_pm is not None
     for tree in other_trees:
         whens = tree.findall("Document/Placemark/gx:Track/when", namespaces=FF_XML_NS)
-        coords = tree.findall(
-            "Document/Placemark/gx:Track/gx:coord", namespaces=FF_XML_NS
-        )
+        coords = tree.findall("Document/Placemark/gx:Track/gx:coord", namespaces=FF_XML_NS)
         for when, coord in zip(whens, coords):
             base_track_pm.append(when)
             base_track_pm.append(coord)
@@ -220,19 +217,15 @@ def to_mfb_csv(fname: str, tree):
     import csv
 
     with open(fname, "w", newline="") as csvfile:
-        writer = csv.DictWriter(
-            csvfile, ["DATE", "LAT", "LON", "ALT", "AIRSPEED", "COURSE"]
-        )
+        writer = csv.DictWriter(csvfile, ["DATE", "LAT", "LON", "ALT", "AIRSPEED", "COURSE"])
         writer.writeheader()
         for when, coord, airspeed, course in zip(
             findall_when(tree),
             findall_coords(tree),
-            xpath(
-                f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='speed_kts']/gx:value"
-            )(tree),
-            xpath(
-                f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='course']/gx:value"
-            )(tree),
+            xpath(f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='speed_kts']/gx:value")(
+                tree
+            ),
+            xpath(f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='course']/gx:value")(tree),
         ):
             lon, lat, alt_m = coord.text.split(" ")
             writer.writerow(
@@ -252,16 +245,13 @@ def main():
     parser.add_argument("filenames", nargs="+")
     parser.add_argument("--out", default="")
     parser.add_argument("-i", "--indices", type=int, nargs="*")
-    parser.add_argument(
-        "-m", "--merge", choices=["google", "mfb", "mfb-sad"], default="google"
-    )
+    parser.add_argument("-m", "--merge", choices=["google", "mfb", "mfb-sad"], default="google")
+    parser.add_argument("--old", default="old")
     args = parser.parse_args()
 
     all_trees = list(map(read_kml, args.filenames))
 
-    merged = merge_ff_kmls(
-        sort_and_select(args.indices, all_trees), merge_type=args.merge
-    )
+    merged = merge_ff_kmls(sort_and_select(args.indices, all_trees), merge_type=args.merge)
 
     base_name = "-".join(
         filter(None, ["merged", args.merge, ",".join(map(str, args.indices or list()))])
@@ -271,6 +261,11 @@ def main():
     write_kml(kmloutname, merged)
     if args.merge == "mfb-sad":
         to_mfb_csv(base_name + ".csv", merged)
+
+    if args.old:
+        Path(args.old).mkdir(exist_ok=True)
+        for fname in args.filenames:
+            Path(fname).resolve().rename(Path(args.old) / fname)
 
 
 if __name__ == "__main__":
