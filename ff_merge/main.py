@@ -1,10 +1,12 @@
 import argparse
 from datetime import datetime
 from functools import partial
+from logging import getLogger
 from pathlib import Path
 
 from lxml import etree
 
+logger = getLogger(__name__)
 clean_parser = etree.XMLParser(remove_blank_text=True)
 
 FT_PER_M = 3.28084
@@ -134,7 +136,7 @@ def merge_simplearraydata(base_tree, other_trees):
         for tree in other_trees:
             sad = find_sad(tree, sad_name)
             assert sad is not None
-            for val_el in sad.findall("gx:value", namespaces=FF_XML_NS):
+            for i, val_el in enumerate(sad.findall("gx:value", namespaces=FF_XML_NS)):
                 base_sad.append(val_el)
         num_sad_values = len(
             xpath(f"Document/ExtendedData/SchemaData/gx:SimpleArrayData[@name='{sad_name}']/gx:value")(
@@ -144,6 +146,43 @@ def merge_simplearraydata(base_tree, other_trees):
         assert num_rows == num_sad_values, f"{sad_name}, {num_sad_values}, {num_rows}"
 
     return base_tree
+
+
+def filter_bad_items_from_track(tree):
+    coords_to_drop = list()
+    track = list()
+    track = tree.find("Document/Placemark/gx:Track", namespaces=FF_XML_NS)
+    whens = tree.findall("Document/Placemark/gx:Track/when", namespaces=FF_XML_NS)
+    coords = tree.findall("Document/Placemark/gx:Track/gx:coord", namespaces=FF_XML_NS)
+    assert len(whens) == len(coords)
+    for i, (when, coord) in enumerate(zip(whens, coords)):
+        if float(coord.text.split(" ")[2]) < 0:
+            logger.warning(f"Dropping negative altitude coordinate at {i}: {coord.text}")
+            coords_to_drop.append((i, when, coord))
+
+    array_len = len(whens)
+    reverse_dropped_indices = set([array_len - i for i, _, _ in coords_to_drop])
+
+    for i, when, coord in reversed(coords_to_drop):
+        track.remove(when)
+        track.remove(coord)
+
+    filtered_len = array_len - len(reverse_dropped_indices)
+
+    def get_sads(tree):
+        return tree.findall("Document/ExtendedData/SchemaData/gx:SimpleArrayData", namespaces=FF_XML_NS)
+
+    for array_data in get_sads(tree):
+        initial_len = len(array_data)
+        name = array_data.attrib["name"]
+        for i, val_el in enumerate(reversed(array_data.findall("gx:value", namespaces=FF_XML_NS))):
+            if i in reverse_dropped_indices:
+                logger.warning(
+                    f"Dropping corresponding item in SimpleArrayData {name} at index {initial_len - i} with val {val_el.text}"
+                )
+                array_data.remove(val_el)
+        assert len(array_data) == filtered_len
+    return tree
 
 
 def google_earth_merge(trees):
@@ -158,7 +197,7 @@ def google_earth_merge(trees):
         base_track_pm.addnext(next_track_pm)
         base_track_pm = next_track_pm
 
-    return merge_simplearraydata(base_tree, other_trees)
+    return filter_bad_items_from_track(merge_simplearraydata(base_tree, other_trees))
 
 
 def myflightbook_merge(merge_sad: bool, trees):
@@ -170,6 +209,7 @@ def myflightbook_merge(merge_sad: bool, trees):
     assert num_coords_before
 
     base_track_pm = base_tree.find("Document/Placemark/gx:Track", namespaces=FF_XML_NS)
+
     assert base_track_pm is not None
     for tree in other_trees:
         whens = tree.findall("Document/Placemark/gx:Track/when", namespaces=FF_XML_NS)
@@ -180,8 +220,10 @@ def myflightbook_merge(merge_sad: bool, trees):
 
     assert count_coords(base_tree) == num_coords_before
     if merge_sad:
-        return merge_simplearraydata(base_tree, other_trees)
+        tree = merge_simplearraydata(base_tree, other_trees)
+        return filter_bad_items_from_track(tree)
 
+    # otherwise, remove all SimpleArrayData via the SchemaData top-level attribute
     remove_el(find_schemadata(base_tree))
     return base_tree
 
@@ -245,7 +287,7 @@ def main():
     parser.add_argument("filenames", nargs="+")
     parser.add_argument("--out", default="")
     parser.add_argument("-i", "--indices", type=int, nargs="*")
-    parser.add_argument("-m", "--merge", choices=["google", "mfb", "mfb-sad"], default="google")
+    parser.add_argument("-m", "--merge", choices=["google", "mfb", "mfb-sad"], default="mfb-sad")
     parser.add_argument("--old", default="old")
     args = parser.parse_args()
 
@@ -265,7 +307,8 @@ def main():
     if args.old:
         Path(args.old).mkdir(exist_ok=True)
         for fname in args.filenames:
-            Path(fname).resolve().rename(Path(args.old) / fname)
+            if (Path(".") / fname).exists():  # is in root directory
+                Path(fname).resolve().rename(Path(args.old) / fname)
 
 
 if __name__ == "__main__":
