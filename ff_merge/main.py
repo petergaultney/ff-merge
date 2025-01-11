@@ -1,4 +1,4 @@
-import argparse
+import typing as ty
 from datetime import datetime
 from functools import partial
 from logging import getLogger
@@ -282,34 +282,39 @@ def to_mfb_csv(fname: str, tree):
             )
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("filenames", nargs="+")
-    parser.add_argument("--out", default="")
-    parser.add_argument("-i", "--indices", type=int, nargs="*")
-    parser.add_argument("-m", "--merge", choices=["google", "mfb", "mfb-sad"], default="mfb-sad")
-    parser.add_argument("--old", default="old")
-    args = parser.parse_args()
+           
 
-    all_trees = list(map(read_kml, args.filenames))
+def merge_ff(
+    *filenames: Path,
+    out: str = '',
+    indices: ty.Sequence[int] = tuple(),
+    merge: ty.Literal['google', 'mfb', 'mfb-sad'] = 'mfb-sad',
+    old_dir: str = 'old',
+):
+    all_trees = list(map(read_kml, filenames))
 
-    merged = merge_ff_kmls(sort_and_select(args.indices, all_trees), merge_type=args.merge)
+    merged = merge_ff_kmls(sort_and_select(indices, all_trees), merge_type=merge)
 
     base_name = "-".join(
-        filter(None, ["merged", args.merge, ",".join(map(str, args.indices or list()))])
+        filter(None, ["merged", merge, ",".join(map(str, indices or list()))])
     )
-    kmloutname = args.out or (base_name + ".kml")
+    kmloutname = out or (base_name + ".kml")
 
     write_kml(kmloutname, merged)
-    if args.merge == "mfb-sad":
+    if merge == "mfb-sad":
         to_mfb_csv(base_name + ".csv", merged)
 
-    if args.old:
-        Path(args.old).mkdir(exist_ok=True)
-        for fname in args.filenames:
+    if old_dir:
+        Path(old_dir).mkdir(exist_ok=True)
+        for fname in filenames:
             if (Path(".") / fname).exists():  # is in root directory
-                Path(fname).resolve().rename(Path(args.old) / fname)
+                Path(fname).resolve().rename(Path(old_dir) / fname)
 
+def main():
+    import defopt
 
+    defopt.run(merge_ff)
+    
+    
 if __name__ == "__main__":
     main()
