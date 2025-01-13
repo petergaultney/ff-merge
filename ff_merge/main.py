@@ -282,22 +282,18 @@ def to_mfb_csv(fname: str, tree):
             )
 
 
-           
-
 def merge_ff(
     *filenames: Path,
-    out: str = '',
+    out: str = "",
     indices: ty.Sequence[int] = tuple(),
-    merge: ty.Literal['google', 'mfb', 'mfb-sad'] = 'mfb-sad',
-    old_dir: str = 'old',
+    merge: ty.Literal["google", "mfb", "mfb-sad"] = "mfb-sad",
+    old_dir: str = "old",
 ):
     all_trees = list(map(read_kml, filenames))
 
     merged = merge_ff_kmls(sort_and_select(indices, all_trees), merge_type=merge)
 
-    base_name = "-".join(
-        filter(None, ["merged", merge, ",".join(map(str, indices or list()))])
-    )
+    base_name = "-".join(filter(None, ["merged", merge, ",".join(map(str, indices or list()))]))
     kmloutname = out or (base_name + ".kml")
 
     write_kml(kmloutname, merged)
@@ -310,11 +306,12 @@ def merge_ff(
             if (Path(".") / fname).exists():  # is in root directory
                 Path(fname).resolve().rename(Path(old_dir) / fname)
 
-def main():
-    import defopt
 
-    defopt.run(merge_ff)
-    
-    
+def main():
+    import argh
+
+    argh.dispatch_command(merge_ff)
+
+
 if __name__ == "__main__":
     main()
